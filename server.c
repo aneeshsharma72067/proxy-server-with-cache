@@ -50,7 +50,44 @@ void *thread_fn(void *socketNew)
 
     char *buffer = (char *)calloc(MAX_BYTES, sizeof(char));
     bzero(buffer, MAX_BYTES);
-    // bytes_send_client = recv(socket, buffer, )
+    bytes_send_client = recv(socket, buffer, MAX_BYTES, 0);
+
+    while (bytes_send_client > 0)
+    {
+        len = strlen(buffer);
+        if (strstr(buffer, "\r\n\r\n") == NULL)
+        {
+            bytes_send_client = recv(socket, buffer + len, MAX_BYTES, 0);
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    // Allocates some memory to a character array and returns a pointer to that array
+    char *tempReq = (char *)malloc(strlen(buffer) * sizeof(char));
+    for (int i = 0; i < strlen(buffer); i++)
+    {
+        tempReq[i] = buffer[i];
+    }
+    struct cache_element *temp = find(tempReq);
+    if (temp != NULL)
+    {
+        int size = temp->len / sizeof(char);
+        int pos = 0;
+        char response[MAX_BYTES];
+        while (pos < size)
+        {
+            bzero(response, MAX_BYTES);
+            for (int i = 0; i < MAX_BYTES; i++)
+            {
+                response[1] = temp->data[1];
+                pos++;
+            }
+            send(socket, response, MAX_BYTES, 0);
+        }
+    }
 }
 
 int main(int argc, char *const argv[])
