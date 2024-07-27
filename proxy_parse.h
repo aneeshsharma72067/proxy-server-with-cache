@@ -32,17 +32,22 @@
  */
 struct ParsedRequest
 {
-    char *method;
-    char *protocol;
-    char *host;
-    char *port;
-    char *path;
-    char *version;
-    char *buf;
-    size_t buflen;
-    struct ParsedHeader *headers;
-    size_t headersused;
-    size_t headerslen;
+   char *method;
+   char *protocol;
+
+   /* Requests Host*/
+   char *host;
+
+   /* Port Number*/
+   char *port;
+
+      char *path;
+   char *version;
+   char *buf;
+   size_t buflen;
+   struct ParsedHeader *headers;
+   size_t headersused;
+   size_t headerslen;
 };
 
 /*
@@ -52,10 +57,10 @@ struct ParsedRequest
 */
 struct ParsedHeader
 {
-    char *key;
-    size_t keylen;
-    char *value;
-    size_t valuelen;
+   char *key;
+   size_t keylen;
+   char *value;
+   size_t valuelen;
 };
 
 /* Create an empty parsing object to be used exactly once for parsing a single

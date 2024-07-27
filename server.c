@@ -46,7 +46,7 @@ void *thread_fn(void *socketNew)
 
     int *t = (int *)socketNew;
     int socket = *t;
-    int bytes_send_client, len;
+    int bytes_send_client, len; // data send by client and its length
 
     char *buffer = (char *)calloc(MAX_BYTES, sizeof(char));
     bzero(buffer, MAX_BYTES);
@@ -87,6 +87,31 @@ void *thread_fn(void *socketNew)
             }
             send(socket, response, MAX_BYTES, 0);
         }
+        printf("Data retrieved from the catche\n");
+        printf("%s\n\n",response);
+    }
+    else if(bytes_send_client > 0){
+        len = strlen(buffer);
+        struct ParsedRequest *request = ParsedRequest_create();
+        if(ParsedRequest_parse(request, buffer, len) < 0){
+            printf("Parsing failed \n");
+        }
+        else{
+            bzero(buffer, MAX_BYTES);
+            if(!strcmp(request->method, "GET")){
+                if(request->host && request->path && checkHTTPversion(request->version) == 1){
+                    bytes_send_client = handle_request(socket, request, tempReq);
+                    if(bytes_send_client == -1){
+                        sendErrorMessage(socket, 500);
+                    }
+                }else{
+                    sendErrorMessage(socket, 500);
+                }
+            }else{
+                printf("This code doesn't support any method apart GET\n");
+            }
+        }
+        ParsedRequest_destroy(request);
     }
 }
 
