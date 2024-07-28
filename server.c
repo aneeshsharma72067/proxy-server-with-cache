@@ -14,6 +14,7 @@
 #define MAX_BYTES 4096
 
 typedef struct cache_element cache_element;
+typedef struct ParsedRequest ParsedRequest;
 
 struct cache_element
 {
@@ -37,6 +38,36 @@ pthread_mutex_t lock; // same as semaphore only two values - on and off
 cache_element *head;
 int cache_size;
 
+int handle_request(int clientSocketId, ParsedRequest *request, char *tempReq)
+{
+    char *buf = (char *)malloc(sizeof(char) * MAX_BYTES);
+    strcpy(buf, "GET ");
+    strcat(buf, request->path);
+    strcat(buf, " ");
+    strcat(buf, request->version);
+    strcat(buf, "\r\n");
+
+    size_t len = strlen(buf);
+
+    if (ParsedHeader_set(request, "Connection", "close") < 0)
+    {
+        printf("Set header key is not working !");
+    }
+
+    if (ParsedHeader_get(request, "Host") == NULL)
+    {
+        if (ParsedHeader_set(request, "Host", request->host) < 0)
+        {
+            printf("Set Host header key is not working !");
+        }
+    }
+
+    if (ParsedRequest_unparse_headers(request, buf + len, (size_t)(MAX_BYTES - len)))
+    {
+        printf("Unparse Failed");
+    }
+};
+
 void *thread_fn(void *socketNew)
 {
     sem_wait(&semaphore);
@@ -46,18 +77,18 @@ void *thread_fn(void *socketNew)
 
     int *t = (int *)socketNew;
     int socket = *t;
-    int bytes_send_client, len; // data send by client and its length
+    int bytes_sent_by_client, len; // data sent by client and its length
 
     char *buffer = (char *)calloc(MAX_BYTES, sizeof(char));
     bzero(buffer, MAX_BYTES);
-    bytes_send_client = recv(socket, buffer, MAX_BYTES, 0);
+    bytes_sent_by_client = recv(socket, buffer, MAX_BYTES, 0);
 
-    while (bytes_send_client > 0)
+    while (bytes_sent_by_client > 0)
     {
         len = strlen(buffer);
         if (strstr(buffer, "\r\n\r\n") == NULL)
         {
-            bytes_send_client = recv(socket, buffer + len, MAX_BYTES, 0);
+            bytes_sent_by_client = recv(socket, buffer + len, MAX_BYTES, 0);
         }
         else
         {
@@ -65,14 +96,14 @@ void *thread_fn(void *socketNew)
         }
     }
 
-    // Allocates some memory to a character array and returns a pointer to that array
+    // A URL Paramter created by allocating some memory to a character array and returning a pointer to that array
     char *tempReq = (char *)malloc(strlen(buffer) * sizeof(char));
     for (int i = 0; i < strlen(buffer); i++)
     {
         tempReq[i] = buffer[i];
     }
     struct cache_element *temp = find(tempReq);
-    if (temp != NULL)
+    if (temp != NULL) // If the request is found in cache
     {
         int size = temp->len / sizeof(char);
         int pos = 0;
@@ -88,31 +119,53 @@ void *thread_fn(void *socketNew)
             send(socket, response, MAX_BYTES, 0);
         }
         printf("Data retrieved from the catche\n");
-        printf("%s\n\n",response);
+        printf("%s\n\n", response);
     }
-    else if(bytes_send_client > 0){
+    else if (bytes_sent_by_client > 0) // If the request was not found in cache but we recieved request/bytes from the client successfully
+    {
         len = strlen(buffer);
-        struct ParsedRequest *request = ParsedRequest_create();
-        if(ParsedRequest_parse(request, buffer, len) < 0){
+        ParsedRequest *request = ParsedRequest_create();
+        if (ParsedRequest_parse(request, buffer, len) < 0)
+        {
             printf("Parsing failed \n");
         }
-        else{
+        else
+        {
             bzero(buffer, MAX_BYTES);
-            if(!strcmp(request->method, "GET")){
-                if(request->host && request->path && checkHTTPversion(request->version) == 1){
-                    bytes_send_client = handle_request(socket, request, tempReq);
-                    if(bytes_send_client == -1){
-                        sendErrorMessage(socket, 500);
+            if (!strcmp(request->method, "GET")) // If the request method is GET
+            {
+                if (request->host && request->path && checkHTTPversion(request->version) == 1) // If host is valid  and URL path is valid and the HTTP version is 1
+                {
+                    bytes_sent_by_client = handle_request(socket, request, tempReq);
+                    if (bytes_sent_by_client == -1)
+                    {
+                        sendErrorMessage(socket, 500); // send an error
                     }
-                }else{
+                }
+                else
+                {
                     sendErrorMessage(socket, 500);
                 }
-            }else{
-                printf("This code doesn't support any method apart GET\n");
+            }
+            else
+            {
+                printf("This code doesn't support any method apart from GET\n");
             }
         }
         ParsedRequest_destroy(request);
     }
+    else if (bytes_sent_by_client == 0)
+    {
+        printf("Client is disconnected");
+    }
+    shutdown(socket, SHUT_RDWR); // Shut down a socket, SHUT_RDWR -> terminate both reading and writing operations
+    close(socket);
+    free(buffer);
+    sem_post(&semaphore);
+    sem_getvalue(&semaphore, p);
+    printf("Semaphore post value is %d\n");
+    free(tempReq);
+    return NULL;
 }
 
 int main(int argc, char *const argv[])
