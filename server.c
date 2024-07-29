@@ -44,31 +44,31 @@ int cache_size;
 */
 int connectRemoteServer(char *host_addr, int port_num)
 {
-    int remoteSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (remoteSocket < 0)
+    int remoteSocket = socket(AF_INET, SOCK_STREAM, 0); // remote socket created by the socket() function
+    if (remoteSocket < 0)                               // if socket creation was not successfull
     {
         printf("Error in create remote socket !\n");
         return -1;
     }
-    struct hostent *host = gethostbyname(host_addr);
-    if (host == NULL)
+    struct hostent *host = gethostbyname(host_addr); // a structure containing host information
+    if (host == NULL)                                // if the hostname resolution was unsuccessful
     {
         fprintf(stderr, "No such host exists\n");
         return -1;
     }
+    
+    struct sockaddr_in server_addr;                   // server address information
+    bzero((char *)&server_addr, sizeof(server_addr)); // initializes the structure to zero
+    server_addr.sin_family = AF_INET;                 // sets the address family to IPv4
+    server_addr.sin_port = htons(port_num);           // sets the port number in network byte order
 
-    struct sockaddr_in server_addr;
-    bzero((char *)&server_addr, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port_num);
-
-    bcopy((char *)&host->h_addr_list, (char *)&server_addr.sin_addr.s_addr, host->h_length);
-    if (connect(remoteSocket, (const struct sockaddr *)&server_addr, (socklen_t)sizeof(server_addr)) < 0)
+    bcopy((char *)&host->h_addr_list, (char *)&server_addr.sin_addr.s_addr, host->h_length);              // copies the IP address from host to the server_addr structure
+    if (connect(remoteSocket, (const struct sockaddr *)&server_addr, (socklen_t)sizeof(server_addr)) < 0) // attempts to connect to the server using the specified socket, address, and length
     {
-        fprintf(stderr, "Error in connecting");
+        fprintf(stderr, "Error in connecting"); // print error message if connection was unsuccessfull
         return -1;
     }
-    return remoteSocket;
+    return remoteSocket; // return the socket desciptor on success
 }
 
 int handle_request(int clientSocketId, ParsedRequest *request, char *tempReq)
@@ -106,6 +106,27 @@ int handle_request(int clientSocketId, ParsedRequest *request, char *tempReq)
         server_port = atoi(request->port);
     }
     int remoteSocketId = connectRemoteServer(request->host, server_port);
+
+    if (remoteSocketId < 0)
+    {
+        return -1;
+    }
+    int bytes_sent = send(remoteSocketId, buf, strlen(buf), 0);
+    bzero(buf, MAX_BYTES);
+    bytes_sent = recv(remoteSocketId, buf, MAX_BYTES - 1, 0);
+    char *temp_buffer = (char *)malloc(sizeof(char) * MAX_BYTES);
+    int temp_buffer_size = MAX_BYTES;
+    int temp_buffer_index = 0;
+
+    while (bytes_sent > 0)
+    {
+        bytes_sent = send(clientSocketId, buf, bytes_sent, 0);
+        for (int i = 0; i < bytes_sent / sizeof(char); i++)
+        {
+            temp_buffer[temp_buffer_index] = buf[i];
+            temp_buffer_index++;
+        }
+    }
 };
 
 void *thread_fn(void *socketNew)
