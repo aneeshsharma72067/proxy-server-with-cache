@@ -155,6 +155,15 @@ int handle_request(int clientSocketId, ParsedRequest *request, char *tempReq)
     return 0;
 };
 
+int sendErrorMessage(int socket, int status_code)
+{
+    char str[1024];
+    char currentTime[50];
+    time_t now = time(0);
+
+    struct tm data = *gmtime(&now);
+}
+
 // checks HTTP version
 int checkHTTPversion(char *msg)
 {
