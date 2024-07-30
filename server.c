@@ -13,6 +13,8 @@
 
 #define MAX_CLIENTS 10
 #define MAX_BYTES 4096
+#define MAX_ELEMENT_SIZE 10 * (1 << 10)
+#define MAX_SIZE 200 * (1 << 20)
 
 typedef struct cache_element cache_element;
 typedef struct ParsedRequest ParsedRequest;
@@ -73,7 +75,7 @@ int connectRemoteServer(char *host_addr, int port_num)
 
 /*
     The handle_request function handle's an incoming HTTP request, forwards it to a remote server and returns the response to the client. It also caches the response for potential future use.
-    So basically client -> proxy_server -> server back and forth
+    So basically client -> proxy_server -> server, back and forth
 */
 int handle_request(int clientSocketId, ParsedRequest *request, char *tempReq)
 {
@@ -441,7 +443,6 @@ int main(int argc, char *const argv[])
     return 0;
 }
 
-
 // finds and returns an element in the cache
 cache_element *find(char *url)
 {
@@ -465,10 +466,46 @@ cache_element *find(char *url)
             site = site->next;
         }
     }
-    else{
+    else
+    {
         printf("URL not found");
     }
-    temp_lock_val = pthread_mutex_lock(&lock);
+    temp_lock_val = pthread_mutex_unlock(&lock);
     printf("Lock is unlocked");
     return site;
+}
+
+int add_cache_element(char *data, int size, char *url)
+{
+    int temp_lock_val = pthread_mutex_lock(&lock);
+    printf("Add Cache Lock acquired %d\n", temp_lock_val);
+
+    int element_size = size + 1 + strlen(url) + sizeof(cache_element);
+    if (element_size < MAX_ELEMENT_SIZE)
+    {
+        temp_lock_val = pthread_mutex_unlock(&lock);
+        printf("Add cache lock is unlocked");
+        return 0;
+    }
+    else
+    {
+        while (cache_size + element_size > MAX_SIZE)
+        {
+            remove_cache_element();
+        }
+        cache_element *element = (cache_element *)malloc(sizeof(cache_element));
+        element->data = (char *)malloc(size + 1);
+        strcpy(element->data, data);
+        element->url = (char *)malloc(strlen(url) + sizeof(char) + 1);
+        strcpy(element->url, url);
+        element->lru_time_track = time(NULL);
+        element->next = head;
+        element->len = size;
+        head = element;
+        cache_size += element_size;
+        temp_lock_val = pthread_mutex_unlock(&lock);
+        printf("Add Cache lock is unlocked\n");
+        return 1;
+    }
+    return 0;
 }
