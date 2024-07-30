@@ -56,7 +56,7 @@ int connectRemoteServer(char *host_addr, int port_num)
         fprintf(stderr, "No such host exists\n");
         return -1;
     }
-    
+
     struct sockaddr_in server_addr;                   // server address information
     bzero((char *)&server_addr, sizeof(server_addr)); // initializes the structure to zero
     server_addr.sin_family = AF_INET;                 // sets the address family to IPv4
@@ -71,63 +71,90 @@ int connectRemoteServer(char *host_addr, int port_num)
     return remoteSocket; // return the socket desciptor on success
 }
 
+/*
+    The handle_request function handle's an incoming HTTP request, forwards it to a remote server and returns the response to the client. It also caches the response for potential future use.
+    So basically client -> proxy_server -> server back and forth
+*/
 int handle_request(int clientSocketId, ParsedRequest *request, char *tempReq)
 {
-    char *buf = (char *)malloc(sizeof(char) * MAX_BYTES);
+    char *buf = (char *)malloc(sizeof(char) * MAX_BYTES); // buffer for storing the constructed HTTP request
+
+    // constructs the request line by concatenating "GET ", the request path, a space, the HTTP version, and a newline character into the buffer.
     strcpy(buf, "GET ");
     strcat(buf, request->path);
     strcat(buf, " ");
     strcat(buf, request->version);
     strcat(buf, "\r\n");
 
-    size_t len = strlen(buf);
+    size_t len = strlen(buf); // Length of the constructed request line.
 
-    if (ParsedHeader_set(request, "Connection", "close") < 0)
+    if (ParsedHeader_set(request, "Connection", "close") < 0) // Sets the "Connection" header to "close" in the parsed request
     {
-        printf("Set header key is not working !");
+        printf("Set header key is not working !"); // Print error message if unsuccessfull
     }
 
-    if (ParsedHeader_get(request, "Host") == NULL)
+    if (ParsedHeader_get(request, "Host") == NULL) // Checks if the "Host" header exists in the parsed request
     {
-        if (ParsedHeader_set(request, "Host", request->host) < 0)
+        if (ParsedHeader_set(request, "Host", request->host) < 0) // If not, sets it to the value of request->host
         {
-            printf("Set Host header key is not working !");
+            printf("Set Host header key is not working !"); // If unsuccessful, prints an error message.
         }
     }
 
-    if (ParsedRequest_unparse_headers(request, buf + len, (size_t)(MAX_BYTES - len)))
+    if (ParsedRequest_unparse_headers(request, buf + len, (size_t)(MAX_BYTES - len))) // appends the headers from request object to buffer
     {
         printf("Unparse Failed");
     }
 
-    int server_port = 80;
-    if (request->port != NULL)
+    int server_port = 80;      // use default port as 80
+    if (request->port != NULL) // if port is provided with the request
     {
-        server_port = atoi(request->port);
+        server_port = atoi(request->port); // then use the given port after converting it to integer
     }
-    int remoteSocketId = connectRemoteServer(request->host, server_port);
+    int remoteSocketId = connectRemoteServer(request->host, server_port); // connects to the remote server
 
-    if (remoteSocketId < 0)
+    if (remoteSocketId < 0) // if connection to remote server fails
     {
         return -1;
     }
-    int bytes_sent = send(remoteSocketId, buf, strlen(buf), 0);
-    bzero(buf, MAX_BYTES);
-    bytes_sent = recv(remoteSocketId, buf, MAX_BYTES - 1, 0);
-    char *temp_buffer = (char *)malloc(sizeof(char) * MAX_BYTES);
-    int temp_buffer_size = MAX_BYTES;
-    int temp_buffer_index = 0;
+    int bytes_sent = send(remoteSocketId, buf, strlen(buf), 0); // send the constructed HTTP request to the remote server
+    bzero(buf, MAX_BYTES);                                      // clears the buffer
+    bytes_sent = recv(remoteSocketId, buf, MAX_BYTES - 1, 0);   // receive the data from the remote server and store it in the buffer, store the number of bytes received in bytes_sent
 
+    char *temp_buffer = (char *)malloc(sizeof(char) * MAX_BYTES); // allocating a temporary buffer to store the response data for caching
+    int temp_buffer_size = MAX_BYTES;                             // initial size of the temporary buffer
+    int temp_buffer_index = 0;                                    // intialize the index for temporary buffer
+
+    // we are sending data to client and receiving data from server and on and on
     while (bytes_sent > 0)
     {
-        bytes_sent = send(clientSocketId, buf, bytes_sent, 0);
-        for (int i = 0; i < bytes_sent / sizeof(char); i++)
+        bytes_sent = send(clientSocketId, buf, bytes_sent, 0); // sending data to client in chunks
+        for (int i = 0; i < bytes_sent / sizeof(char); i++)    // Copy the data from buf to temp_buffer for caching.
         {
             temp_buffer[temp_buffer_index] = buf[i];
             temp_buffer_index++;
         }
+
+        temp_buffer_size = MAX_BYTES;
+        temp_buffer = (char *)realloc(temp_buffer, temp_buffer_size); // reallocate temp_buffer if needed
+        if (bytes_sent < 0)                                           // checking if sending data to client failed
+        {
+            perror("Error in sending data to the client !");
+            break;
+        }
+        bzero(buf, MAX_BYTES);                                    // clear the buffer
+        bytes_sent = recv(remoteSocketId, buf, MAX_BYTES - 1, 0); // recieve more data from the remote server
     }
+
+    temp_buffer[temp_buffer_index] = '\0';                        // null terminating the temp_buffer, it allows functions like printf and strlen to know where the string ends.
+    free(buf);                                                    // free the allocated buffer
+    add_cache_element(temp_buffer, strlen(temp_buffer), tempReq); // adds the entire response to the cache
+    free(temp_buffer);                                            // free the temporary buffer
+    close(remoteSocketId);                                        // close the connection to the remote server
+
+    return 0;
 };
+
 
 void *thread_fn(void *socketNew)
 {
