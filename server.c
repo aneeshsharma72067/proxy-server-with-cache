@@ -155,6 +155,16 @@ int handle_request(int clientSocketId, ParsedRequest *request, char *tempReq)
     return 0;
 };
 
+// checks HTTP version
+int checkHTTPversion(char *msg)
+{
+    int version = -1;
+    if (strncmp(msg, "HTTP/1.1", 8) == 0 || strncmp(msg, "HTTP/1.0", 8) == 0)
+    {
+        version = 1;
+    }
+    return version;
+}
 
 void *thread_fn(void *socketNew)
 {
