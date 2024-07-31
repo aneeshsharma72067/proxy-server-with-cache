@@ -45,7 +45,7 @@ int cache_size;
     The connectRemoteServer function establishes a TCP connection to a remote server with host address host_addr and port number port_num and returns the socket descriptor on success, or -1 on failure.
 */
 int connectRemoteServer(char *host_addr, int port_num)
-{
+{   
     int remoteSocket = socket(AF_INET, SOCK_STREAM, 0); // remote socket created by the socket() function
     if (remoteSocket < 0)                               // if socket creation was not successfull
     {
@@ -224,104 +224,109 @@ int checkHTTPversion(char *msg)
     return version;
 }
 
+/*
+    The thread_fn function handles the incoming client requests in a separate thread. It handles request parsing, caching, forwarding, and error handling.
+*/
 void *thread_fn(void *socketNew)
 {
-    sem_wait(&semaphore);
+    sem_wait(&semaphore); // acquires the semaphore, ensuring only one thread can execute at a time
     int p;
-    sem_getvalue(&semaphore, p);
-    printf("Semaphore value is %d\n", p);
+    sem_getvalue(&semaphore, p);          // stores the current value of semaphore in p
+    printf("Semaphore value is %d\n", p); // print the semaphore value
 
-    int *t = (int *)socketNew;
-    int socket = *t;
+    int *t = (int *)socketNew;     // cast the void pointer to an integer pointer
+    int socket = *t;               // dereference the pointer to get the socket ID
     int bytes_sent_by_client, len; // data sent by client and its length
 
-    char *buffer = (char *)calloc(MAX_BYTES, sizeof(char));
-    bzero(buffer, MAX_BYTES);
-    bytes_sent_by_client = recv(socket, buffer, MAX_BYTES, 0);
+    char *buffer = (char *)calloc(MAX_BYTES, sizeof(char)); // allocating memory for the buffer to store received data
+    bzero(buffer, MAX_BYTES); // clear the buffer
+    bytes_sent_by_client = recv(socket, buffer, MAX_BYTES, 0); // receive the data from the client
 
+    // loop to receive the complete HTTP request (until the end of headers "\r\n\r\n")
     while (bytes_sent_by_client > 0)
     {
-        len = strlen(buffer);
-        if (strstr(buffer, "\r\n\r\n") == NULL)
+        len = strlen(buffer); // get the length of the current buffer
+        if (strstr(buffer, "\r\n\r\n") == NULL) // if the end of header is not found
         {
-            bytes_sent_by_client = recv(socket, buffer + len, MAX_BYTES, 0);
+            bytes_sent_by_client = recv(socket, buffer + len, MAX_BYTES, 0); // then receive more data
         }
         else
         {
-            break;
+            break; // end of headers found, break the loop
         }
     }
 
-    // A URL Paramter created by allocating some memory to a character array and returning a pointer to that array
+    // A copy of the recieved request for caching purpose
     char *tempReq = (char *)malloc(strlen(buffer) * sizeof(char));
     for (int i = 0; i < strlen(buffer); i++)
     {
         tempReq[i] = buffer[i];
     }
-    struct cache_element *temp = find(tempReq);
+
+    struct cache_element *temp = find(tempReq); // find the request in the cache
     if (temp != NULL) // If the request is found in cache
     {
-        int size = temp->len / sizeof(char);
-        int pos = 0;
-        char response[MAX_BYTES];
+        int size = temp->len / sizeof(char); // length  of the cached data
+        int pos = 0; // position index for sending data
+        char response[MAX_BYTES]; // response buffer
         while (pos < size)
         {
-            bzero(response, MAX_BYTES);
-            for (int i = 0; i < MAX_BYTES; i++)
+            bzero(response, MAX_BYTES); // clear the response buffer
+            for (int i = 0; i < MAX_BYTES; i++) 
             {
-                response[1] = temp->data[1];
+                response[i] = temp->data[1]; // copy data from cache to response buffer
                 pos++;
             }
-            send(socket, response, MAX_BYTES, 0);
+            send(socket, response, MAX_BYTES, 0); // send the cached data to the client
         }
         printf("Data retrieved from the catche\n");
         printf("%s\n\n", response);
     }
     else if (bytes_sent_by_client > 0) // If the request was not found in cache but we recieved request/bytes from the client successfully
     {
-        len = strlen(buffer);
-        ParsedRequest *request = ParsedRequest_create();
-        if (ParsedRequest_parse(request, buffer, len) < 0)
+        len = strlen(buffer); // length of the buffer
+        ParsedRequest *request = ParsedRequest_create(); // create a ParsedRequest object
+        if (ParsedRequest_parse(request, buffer, len) < 0) // parse the request in a readable format
         {
-            printf("Parsing failed \n");
+            printf("Parsing failed \n"); // if the parsing fails
         }
         else
         {
-            bzero(buffer, MAX_BYTES);
+            bzero(buffer, MAX_BYTES); // clearing the buffer
             if (!strcmp(request->method, "GET")) // If the request method is GET
             {
                 if (request->host && request->path && checkHTTPversion(request->version) == 1) // If host is valid  and URL path is valid and the HTTP version is 1
                 {
-                    bytes_sent_by_client = handle_request(socket, request, tempReq);
-                    if (bytes_sent_by_client == -1)
+                    bytes_sent_by_client = handle_request(socket, request, tempReq); // Handle the request
+                    if (bytes_sent_by_client == -1) 
                     {
-                        sendErrorMessage(socket, 500); // send an error
+                        sendErrorMessage(socket, 500); // send an error if the request handling failed
                     }
                 }
                 else
                 {
-                    sendErrorMessage(socket, 500);
+                    sendErrorMessage(socket, 500); // send an error message if the host or path or HTTP version could not be validated
                 }
             }
             else
             {
-                printf("This code doesn't support any method apart from GET\n");
+                printf("This code doesn't support any method apart from GET\n"); // if the method something else than GET
             }
         }
-        ParsedRequest_destroy(request);
+        ParsedRequest_destroy(request); // destroy the ParsedRequest object
     }
     else if (bytes_sent_by_client == 0)
     {
-        printf("Client is disconnected");
+        printf("Client is disconnected"); // print message if client is disconnected
     }
     shutdown(socket, SHUT_RDWR); // Shut down a socket, SHUT_RDWR -> terminate both reading and writing operations
-    close(socket);
-    free(buffer);
-    sem_post(&semaphore);
-    sem_getvalue(&semaphore, p);
-    printf("Semaphore post value is %d\n");
-    free(tempReq);
-    return NULL;
+    close(socket); // close the socket
+    free(buffer); // free the buffer
+    sem_post(&semaphore); // increment the semaphore value, making it available
+    sem_getvalue(&semaphore, p); // get the current value of semaphore
+    printf("Semaphore post value is %d\n"); // print the current value of semaphore
+    free(tempReq); // free the tempReq buffer
+    return NULL; // return NULL
 }
 
 int main(int argc, char *const argv[])
